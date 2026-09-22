@@ -56,6 +56,9 @@ pyvenv.cfg
 # Project-specific runtime files
 string_history.json
 
+# NiceGUI GUI runtime storage
+.nicegui/
+
 # Logs
 *.log
 logs/

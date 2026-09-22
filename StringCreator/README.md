@@ -132,6 +132,45 @@ If you prefer not to use a virtual environment:
    python StringCreator.py
    ```
 
+## 🖥️ Graphical Interface (GUI)
+
+A local desktop GUI (built with [NiceGUI](https://nicegui.io/)) is available as an
+alternative to the command line. It reuses the same core, so every generator, the
+validation tools, and history are available with a point-and-click interface.
+
+1. **Install the GUI dependencies** (in addition to the base requirements):
+   ```bash
+   pip install -r requirements-gui.txt
+   ```
+
+2. **Run the GUI**
+   ```bash
+   python gui.py
+   ```
+   By default this opens a **native desktop window** (via `pywebview`). To open it in a
+   **browser tab** instead (no `pywebview` needed), set an environment variable:
+
+   **Windows (PowerShell):**
+   ```powershell
+   $env:STRINGCREATOR_GUI_NATIVE = "0"; python gui.py
+   ```
+
+   **Linux/Mac:**
+   ```bash
+   STRINGCREATOR_GUI_NATIVE=0 python gui.py
+   ```
+   Then open <http://localhost:8080>.
+
+The GUI has three tabs:
+- **Generate** – pick a type, set length/batch/encoding/uniqueness, generate, copy, and
+  export to text/JSON/CSV.
+- **Validate** – check a personnummer, Luhn checksum, credit-card number, or password
+  strength.
+- **History** – view the most recent generations.
+
+> **Note**: Like the CLI, the GUI is intended to run **locally for a single user** — it
+> generates real attack payloads and should not be hosted or exposed on a network.
+
 ## 💻 Usage
 
 ### Interactive Mode (Default)
@@ -332,8 +371,13 @@ This tool is intended for:
 ```
 StringCreator/
 │
-├── StringCreator.py       # Main script
-├── requirements.txt       # Python dependencies
+├── StringCreator.py       # Main script (CLI + interactive mode)
+├── gui.py                 # NiceGUI desktop GUI (optional)
+├── requirements.txt       # Runtime dependency (pyperclip)
+├── requirements-gui.txt   # Optional GUI dependencies (nicegui, pywebview)
+├── test_stringcreator.py  # Core unit tests
+├── test_gui.py            # GUI smoke tests
+├── persnumber/           # Test personnummer CSV data
 ├── README.md             # This file
 ├── venv/                 # Virtual environment (created by you)
 └── string_history.json   # Auto-generated history file
@@ -405,6 +449,9 @@ python StringCreator.py --validate password "MyP@ssw0rd!"
 pip install pytest
 pytest
 ```
+
+The GUI smoke tests in `test_gui.py` are skipped automatically if `nicegui` is not
+installed, so the core suite runs with just `pytest` + `pyperclip`.
 
 ## 🔥 Advanced Use Cases
 

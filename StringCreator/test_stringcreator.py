@@ -99,3 +99,25 @@ def test_generate_credit_card_respects_brand():
 def test_luhn_is_valid_rejects_empty():
     assert not sc.luhn_is_valid("")
     assert not sc.luhn_is_valid("abc")
+
+
+def test_type_labels_cover_all_types():
+    assert set(sc.TYPE_LABELS) == set(range(1, sc.MAX_TYPE + 1))
+    assert sc.MAX_TYPE == max(sc.TYPE_LABELS)
+
+
+def test_save_output_formats(tmp_path):
+    txt = tmp_path / "o.txt"
+    sc.save_output(str(txt), ["abc", "def"], "text")
+    assert txt.read_text(encoding="utf-8") == "abc\ndef"
+
+    js = tmp_path / "o.json"
+    sc.save_output(str(js), ["abc"], "json", charset_type=1, length_bytes=3)
+    import json as _json
+    data = _json.loads(js.read_text(encoding="utf-8"))
+    assert data["content"] == "abc" and data["type"] == 1
+
+    cv = tmp_path / "o.csv"
+    sc.save_output(str(cv), ["abc", "def"], "csv", charset_type=1, length_bytes=3)
+    lines = cv.read_text(encoding="utf-8").strip().splitlines()
+    assert lines[0].startswith("Timestamp") and len(lines) == 3

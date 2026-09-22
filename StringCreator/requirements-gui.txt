@@ -1,0 +1,4 @@
+# GUI dependencies (optional — only needed for the NiceGUI front-end, gui.py).
+# The command-line tool itself only requires the packages in requirements.txt.
+nicegui
+pywebview
