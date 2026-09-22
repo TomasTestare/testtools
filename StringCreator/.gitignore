@@ -36,7 +36,6 @@ pyvenv.cfg
 
 # Visual Studio
 .vs/
-.vscode/
 *.suo
 *.user
 *.userosscache
@@ -44,10 +43,8 @@ pyvenv.cfg
 *.userprefs
 *.pidb
 *.sln.iml
-.idea/
 *.swp
 *~
-.DS_Store
 
 # Visual Studio Code
 .vscode/

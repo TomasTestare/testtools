@@ -27,15 +27,20 @@ A powerful Python tool for generating random strings and security testing payloa
 ### Test Data Generation
 - **Swedish Personnummer (Valid)** - Generate valid Swedish social security numbers with correct Luhn check digit
 - **Swedish Personnummer (Invalid)** - Generate invalid Swedish social security numbers with incorrect Luhn check digit
+- **UUID v4** - Generate random universally unique identifiers
+- **Credit card numbers** - Generate Luhn-valid fake card numbers (Visa/MC/Amex/Discover) for testing
 
 ### Advanced Features
 - ✅ **Command-line interface** for automation
 - ✅ **Interactive mode** for guided usage
 - ✅ **Batch generation** - Generate multiple strings at once
+- ✅ **Unique batch mode** - Guarantee no duplicates within a batch (`--unique`)
+- ✅ **Validation mode** - Check personnummer, Luhn, credit card, or password strength (`--validate`)
 - ✅ **Encoding support** - Base64, URL, Hex, HTML entities
 - ✅ **File export** - Save as text, JSON, or CSV
 - ✅ **History tracking** - Keep last 50 generations
 - ✅ **Password strength checker** - Validate password quality
+- ✅ **Quiet mode** - Print only the value for clean scripting (`--quiet`)
 - ✅ **Clipboard integration** - Automatic copy to clipboard
 - ✅ **Continuous loop mode** - Generate multiple strings without restarting
 
@@ -251,6 +256,8 @@ python StringCreator.py -t 1 -l 32 --no-clipboard
 | 15 | JWT manipulation payloads | Token security testing |
 | 16 | Swedish Personnummer (valid) | Valid Swedish SSN with correct Luhn check digit |
 | 17 | Swedish Personnummer (invalid) | Invalid Swedish SSN with incorrect Luhn check digit |
+| 18 | UUID v4 | Random universally unique identifiers |
+| 19 | Credit card number | Luhn-valid fake card numbers (Visa/MC/Amex/Discover) for testing |
 
 ## 📊 Examples
 
@@ -302,8 +309,8 @@ python StringCreator.py -t 16 -b 100 -o personnummer.csv -f csv
 ```
 
 **Example Output:**
-- Valid: `19850315-2374` (correct Luhn check digit)
-- Invalid: `19850315-2375` (incorrect Luhn check digit)
+- Valid: `19640306-3362` (correct Luhn check digit)
+- Invalid: `19640306-3363` (incorrect Luhn check digit)
 
 ## 🔒 Security Notice
 
@@ -337,16 +344,19 @@ StringCreator/
 ## 🛠️ Command-Line Arguments
 
 ```
-usage: StringCreator.py [-h] [-t {1-17}] [-l LENGTH] [--all]
-                        [-e {base64,url,hex,html}] [-b BATCH]
+usage: StringCreator.py [-h] [-t {1-19}] [-l LENGTH] [--all]
+                        [-e {base64,url,hex,html}] [-b BATCH] [--unique]
                         [-o OUTPUT] [-f {text,json,csv}]
-                        [--no-clipboard] [--history] [--custom CUSTOM]
+                        [--no-clipboard] [--quiet]
+                        [--validate TYPE VALUE]
+                        [--history] [--custom CUSTOM]
+                        [--seed SEED] [--version]
 
 Advanced String Generator & Security Testing Tool
 
 optional arguments:
   -h, --help            show this help message and exit
-  -t TYPE, --type TYPE  Character set type (1-17)
+  -t TYPE, --type TYPE  Character set type (1-19)
   -l LENGTH, --length LENGTH
                         String length in bytes
   --all                 Generate all payloads (for payload types)
@@ -354,13 +364,46 @@ optional arguments:
                         Encoding format (base64, url, hex, html)
   -b BATCH, --batch BATCH
                         Number of strings to generate
+  --unique              Ensure generated values in a batch are unique
   -o OUTPUT, --output OUTPUT
                         Output file path
   -f FORMAT, --format FORMAT
                         Output file format (text, json, csv)
   --no-clipboard        Do not copy to clipboard
+  --quiet               Print only the generated value (no extra messages)
+  --validate TYPE VALUE
+                        Validate VALUE of TYPE
+                        (personnummer|luhn|creditcard|password)
   --history             View generation history
   --custom CUSTOM       Custom character set
+  --seed SEED           Seed the RNG for reproducible test data (not secure)
+  --version             Show program version and exit
+```
+
+> **Note**: Random alphanumeric/ASCII/custom strings are generated with Python's
+> `secrets` module (cryptographically secure) and are **not** affected by `--seed`.
+> `--seed` only makes payload and personnummer selection reproducible.
+
+### Validation mode
+
+Check existing values instead of generating them:
+
+```bash
+python StringCreator.py --validate personnummer 19640306-3362
+python StringCreator.py --validate creditcard 4586379705104281
+python StringCreator.py --validate luhn 79927398713
+python StringCreator.py --validate password "MyP@ssw0rd!"
+```
+
+> **Note**: Random alphanumeric/ASCII/custom strings are generated with Python's
+> `secrets` module (cryptographically secure) and are **not** affected by `--seed`.
+> `--seed` only makes payload and personnummer selection reproducible.
+
+## 🧪 Running Tests
+
+```bash
+pip install pytest
+pytest
 ```
 
 ## 🔥 Advanced Use Cases
@@ -429,7 +472,7 @@ This tool is provided for educational and authorized security testing purposes o
 
 ## 👨‍💻 Author
 
-Created for security testing and development purposes.
+Created by Tomas Lindqvist for security testing and development purposes.
 
 ## 🔗 Quick Reference
 

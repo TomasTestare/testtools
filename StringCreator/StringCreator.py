@@ -1,5 +1,9 @@
 import random
+import secrets
 import string
+import sys
+import calendar
+import uuid
 import pyperclip
 import argparse
 import base64
@@ -10,11 +14,32 @@ from datetime import datetime
 from pathlib import Path
 
 
+# Resolve data files relative to this script so the tool works from any cwd
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 # History file path
-HISTORY_FILE = Path("string_history.json")
+HISTORY_FILE = SCRIPT_DIR / "string_history.json"
 
 # Directory containing test personnummer CSV files
-PERSNUMBER_DIR = Path("persnumber")
+PERSNUMBER_DIR = SCRIPT_DIR / "persnumber"
+
+# Character set type groupings (single source of truth)
+PAYLOAD_TYPES = {3, 4, 5, 8, 10, 11, 12, 13, 14, 15}
+PERSONNUMMER_TYPES = {16, 17}
+# Types that generate a fixed-format value and ignore the length argument
+NO_LENGTH_TYPES = PERSONNUMMER_TYPES | {18, 19}
+# Highest valid charset type
+MAX_TYPE = 19
+
+
+def copy_to_clipboard(text):
+    """Copy text to the clipboard, warning gracefully if unavailable."""
+    try:
+        pyperclip.copy(text)
+        return True
+    except Exception as e:
+        print(f"Warning: could not copy to clipboard: {e}", file=sys.stderr)
+        return False
 
 def load_test_personnummer():
     """Load all test personnummer from CSV files in persnumber directory."""
@@ -48,19 +73,24 @@ def load_history():
         try:
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (OSError, json.JSONDecodeError):
             return []
     return []
 
 
-def save_to_history(generated_string, charset_type, length_bytes):
-    """Save generated string to history."""
+def save_to_history(generated_string, charset_type, length_bytes=None):
+    """Save generated string to history.
+
+    length_bytes is accepted for backwards compatibility but the stored
+    "length" always reflects the actual character count of the output so the
+    metadata is meaningful for payloads and personnummer too.
+    """
     history = load_history()
     entry = {
         "timestamp": datetime.now().isoformat(),
         "string": generated_string[:100] + "..." if len(generated_string) > 100 else generated_string,
         "type": charset_type,
-        "length": length_bytes,
+        "length": len(generated_string),
         "byte_size": len(generated_string.encode('utf-8'))
     }
     history.append(entry)
@@ -68,8 +98,11 @@ def save_to_history(generated_string, charset_type, length_bytes):
     # Keep only last 50 entries
     history = history[-50:]
 
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(history, f, indent=2, ensure_ascii=False)
+    try:
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        print(f"Warning: could not write history: {e}", file=sys.stderr)
 
 
 def view_history():
@@ -180,26 +213,26 @@ def generate_swedish_personnummer(valid=True):
     year = random.randint(1900, 2023)
     month = random.randint(1, 12)
 
-    # Days in month (simple version, doesn't account for leap years perfectly)
-    days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    day = random.randint(1, days_in_month[month - 1])
+    # Leap-year-aware day selection
+    day = random.randint(1, calendar.monthrange(year, month)[1])
 
-    # Format date
+    # Full date with century: YYYYMMDD
     date_str = f"{year:04d}{month:02d}{day:02d}"
 
-    # Generate 3-digit serial number (odd for males, even for females)
+    # Generate 3-digit serial number
     serial = random.randint(0, 999)
     serial_str = f"{serial:03d}"
 
-    # Combine date and serial (first 9 digits)
-    base_number = date_str + serial_str
+    # Swedish personnummer Luhn is computed over YYMMDD + serial (9 digits),
+    # NOT the century digits.
+    luhn_base = date_str[2:] + serial_str
 
     if valid:
         # Calculate correct Luhn check digit
-        check_digit = calculate_luhn_check_digit(base_number)
+        check_digit = calculate_luhn_check_digit(luhn_base)
     else:
         # Generate incorrect check digit
-        correct_check_digit = calculate_luhn_check_digit(base_number)
+        correct_check_digit = calculate_luhn_check_digit(luhn_base)
         # Pick any digit except the correct one
         wrong_digits = [d for d in range(10) if d != correct_check_digit]
         check_digit = random.choice(wrong_digits)
@@ -208,6 +241,56 @@ def generate_swedish_personnummer(valid=True):
     personnummer = f"{date_str}-{serial_str}{check_digit}"
 
     return personnummer
+
+
+def validate_personnummer(personnummer):
+    """Validate a Swedish personnummer's Luhn check digit.
+
+    Accepts formats YYYYMMDD-XXXX, YYMMDD-XXXX, or the same without a dash.
+    Returns True if the check digit is correct.
+    """
+    digits = ''.join(ch for ch in personnummer if ch.isdigit())
+
+    # Normalise to 10 digits (YYMMDD + 3 serial + 1 check)
+    if len(digits) == 12:
+        digits = digits[2:]
+    if len(digits) != 10:
+        return False
+
+    base, check = digits[:9], int(digits[9])
+    return calculate_luhn_check_digit(base) == check
+
+
+def luhn_is_valid(number):
+    """Return True if a numeric string passes the Luhn checksum (check digit included)."""
+    digits = [int(d) for d in number if d.isdigit()]
+    if not digits:
+        return False
+    # Double every second digit from the right (the check digit is position 0)
+    for i in range(len(digits) - 2, -1, -2):
+        digits[i] *= 2
+        if digits[i] > 9:
+            digits[i] -= 9
+    return sum(digits) % 10 == 0
+
+
+# Test credit-card brand prefixes and total lengths (Luhn-valid test PANs only)
+CREDIT_CARD_BRANDS = {
+    'visa': ('4', 16),
+    'mastercard': ('55', 16),
+    'amex': ('34', 15),
+    'discover': ('6011', 16),
+}
+
+
+def generate_credit_card(brand=None):
+    """Generate a Luhn-valid fake credit-card number for testing (not a real card)."""
+    if brand is None:
+        brand = random.choice(list(CREDIT_CARD_BRANDS))
+    prefix, length = CREDIT_CARD_BRANDS[brand]
+    body = prefix + ''.join(str(random.randint(0, 9))
+                            for _ in range(length - len(prefix) - 1))
+    return body + str(calculate_luhn_check_digit(body))
 
 
 def generate_string(length_bytes, charset_type=1, use_all_payloads=False):
@@ -225,12 +308,12 @@ def generate_string(length_bytes, charset_type=1, use_all_payloads=False):
     if charset_type == 1:
         # Alphanumeric only (a-z, 0-9)
         characters = string.ascii_lowercase + string.digits
-        return ''.join(random.choice(characters) for _ in range(length_bytes))
+        return ''.join(secrets.choice(characters) for _ in range(length_bytes))
 
     elif charset_type == 2:
         # All printable ASCII characters
         characters = string.printable.strip()
-        return ''.join(random.choice(characters) for _ in range(length_bytes))
+        return ''.join(secrets.choice(characters) for _ in range(length_bytes))
 
     elif charset_type == 3:
         # SQL Injection payloads
@@ -296,12 +379,12 @@ def generate_string(length_bytes, charset_type=1, use_all_payloads=False):
     elif charset_type == 6:
         # Control characters
         characters = "\n\r\t\0"
-        return ''.join(random.choice(characters) for _ in range(length_bytes))
+        return ''.join(secrets.choice(characters) for _ in range(length_bytes))
 
     elif charset_type == 7:
         # Unicode/Emoji characters
         characters = "🔥💻🚀✨🎯🐛🔒⚡📝🌟中文العربيةहिन्दी日本語한국어"
-        return ''.join(random.choice(characters) for _ in range(length_bytes))
+        return ''.join(secrets.choice(characters) for _ in range(length_bytes))
 
     elif charset_type == 8:
         # Command injection payloads
@@ -327,7 +410,7 @@ def generate_string(length_bytes, charset_type=1, use_all_payloads=False):
     elif charset_type == 9:
         # Mixed dangerous characters
         characters = "'\"<>&;|%$(){}[]\\/.:-=+*!?@#~`\n\r\t"
-        return ''.join(random.choice(characters) for _ in range(length_bytes))
+        return ''.join(secrets.choice(characters) for _ in range(length_bytes))
 
     elif charset_type == 10:
         # LDAP injection payloads
@@ -426,10 +509,18 @@ def generate_string(length_bytes, charset_type=1, use_all_payloads=False):
         # Invalid Swedish personnummer (social security number)
         return generate_swedish_personnummer(valid=False)
 
+    elif charset_type == 18:
+        # UUID version 4
+        return str(uuid.uuid4())
+
+    elif charset_type == 19:
+        # Luhn-valid fake credit-card number (test data)
+        return generate_credit_card()
+
     else:
         # Default to alphanumeric
         characters = string.ascii_lowercase + string.digits
-        return ''.join(random.choice(characters) for _ in range(length_bytes))
+        return ''.join(secrets.choice(characters) for _ in range(length_bytes))
 
 
 def interactive_mode():
@@ -458,6 +549,8 @@ def interactive_mode():
         print("15. JWT manipulation payloads")
         print("16. Swedish Personnummer (valid test data from Skatteverket)")
         print("17. Swedish Personnummer (invalid - with incorrect Luhn check digit)")
+        print("18. UUID v4")
+        print("19. Credit card number (Luhn-valid test data)")
         print("\n0. View History")
         print("Q. Quit")
 
@@ -471,7 +564,7 @@ def interactive_mode():
             view_history()
             continue
 
-        if not choice.isdigit() or int(choice) < 1 or int(choice) > 17:
+        if not choice.isdigit() or int(choice) < 1 or int(choice) > MAX_TYPE:
             print("Invalid choice. Please try again.")
             continue
 
@@ -479,7 +572,7 @@ def interactive_mode():
 
         # For payload options, ask if user wants random or all payloads
         use_all_payloads = False
-        if charset_type in [3, 4, 5, 8, 10, 11, 12, 13, 14, 15]:
+        if charset_type in PAYLOAD_TYPES:
             print("\nPayload options:")
             print("1. Random payload (single)")
             print("2. All payloads (entire list)")
@@ -495,9 +588,9 @@ def interactive_mode():
                 else:
                     print("Invalid choice. Please enter 1 or 2.")
 
-        # Get string length from user (only if not using all payloads or personnummer)
+        # Get string length from user (only if not using all payloads or fixed-format types)
         length_bytes = 0
-        if not use_all_payloads and charset_type not in [16, 17]:
+        if not use_all_payloads and charset_type not in NO_LENGTH_TYPES:
             while True:
                 try:
                     length_bytes = int(input("\nEnter the desired string length in bytes: "))
@@ -517,7 +610,7 @@ def interactive_mode():
 
         # Ask for encoding
         encoding_type = None
-        if batch_count == 1 and not use_all_payloads and charset_type not in [16, 17]:
+        if batch_count == 1 and not use_all_payloads and charset_type not in NO_LENGTH_TYPES:
             print("\nEncoding options:")
             print("1. None (plain text)")
             print("2. Base64")
@@ -546,7 +639,7 @@ def interactive_mode():
         byte_size = len(final_output.encode('utf-8'))
 
         # Copy to clipboard
-        pyperclip.copy(final_output)
+        copy_to_clipboard(final_output)
 
         # Display result
         print("\n" + "=" * 70)
@@ -626,8 +719,38 @@ def interactive_mode():
             break
 
 
+def handle_validate(kind, value):
+    """Validate a supplied value and print the result."""
+    kind = kind.lower()
+    if kind in ('personnummer', 'pnr'):
+        ok = validate_personnummer(value)
+        print(f"{'VALID' if ok else 'INVALID'} personnummer: {value}")
+    elif kind in ('creditcard', 'cc', 'card'):
+        digits = ''.join(c for c in value if c.isdigit())
+        ok = bool(digits) and luhn_is_valid(digits)
+        print(f"{'VALID' if ok else 'INVALID'} credit card: {value}")
+    elif kind == 'luhn':
+        digits = ''.join(c for c in value if c.isdigit())
+        ok = bool(digits) and luhn_is_valid(digits)
+        print(f"{'VALID' if ok else 'INVALID'} Luhn checksum: {value}")
+    elif kind in ('password', 'pw'):
+        strength, score, feedback = check_password_strength(value)
+        print(f"Password strength: {strength} ({score}/6)")
+        if feedback:
+            print(f"Suggestions: {', '.join(feedback)}")
+    else:
+        print(f"Unknown validation type: {kind}. "
+              f"Use personnummer|luhn|creditcard|password", file=sys.stderr)
+
+
 def main():
     """Main entry point with CLI argument support."""
+    # Ensure Unicode output works even when stdout is redirected on Windows
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except (AttributeError, ValueError):
+        pass
+
     parser = argparse.ArgumentParser(
         description='Advanced String Generator & Security Testing Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -638,12 +761,16 @@ Examples:
   python StringCreator.py -t 3 --all              # Generate all SQL injection payloads
   python StringCreator.py -t 1 -l 16 -e base64    # Generate and base64 encode
   python StringCreator.py -t 1 -l 10 -b 5         # Generate 5 random strings
+  python StringCreator.py -t 1 -l 10 -b 5 --unique # 5 unique random strings
+  python StringCreator.py -t 18                    # Generate a UUID v4
+  python StringCreator.py -t 19                    # Generate a test credit-card number
+  python StringCreator.py --validate personnummer 19640306-3362
   python StringCreator.py --history               # View generation history
         """
     )
 
-    parser.add_argument('-t', '--type', type=int, choices=range(1, 18),
-                        help='Character set type (1-17)')
+    parser.add_argument('-t', '--type', type=int, choices=range(1, MAX_TYPE + 1),
+                        help=f'Character set type (1-{MAX_TYPE})')
     parser.add_argument('-l', '--length', type=int,
                         help='String length in bytes')
     parser.add_argument('--all', action='store_true',
@@ -652,66 +779,108 @@ Examples:
                         help='Encoding format')
     parser.add_argument('-b', '--batch', type=int, default=1,
                         help='Number of strings to generate')
+    parser.add_argument('--unique', action='store_true',
+                        help='Ensure generated values in a batch are unique')
     parser.add_argument('-o', '--output', type=str,
                         help='Output file path')
     parser.add_argument('-f', '--format', choices=['text', 'json', 'csv'], default='text',
                         help='Output file format')
     parser.add_argument('--no-clipboard', action='store_true',
                         help='Do not copy to clipboard')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Print only the generated value (no extra messages)')
+    parser.add_argument('--validate', nargs=2, metavar=('TYPE', 'VALUE'),
+                        help='Validate VALUE of TYPE (personnummer|luhn|creditcard|password)')
     parser.add_argument('--history', action='store_true',
                         help='View generation history')
     parser.add_argument('--custom', type=str,
                         help='Custom character set')
+    parser.add_argument('--seed', type=int,
+                        help='Seed the RNG for reproducible output (test data only, not secure)')
+    parser.add_argument('--version', action='version', version='StringCreator 1.2.0')
 
     args = parser.parse_args()
+
+    # Optional deterministic seeding (affects payload/personnummer selection).
+    # Note: secure character generation via secrets is intentionally NOT seeded.
+    if args.seed is not None:
+        random.seed(args.seed)
+
+    # Validate mode
+    if args.validate:
+        handle_validate(args.validate[0], args.validate[1])
+        return
 
     # View history
     if args.history:
         view_history()
         return
 
-    # If no type specified, run interactive mode
-    if args.type is None:
+    # If no type specified (and no custom set), run interactive mode
+    if args.type is None and not args.custom:
         interactive_mode()
         return
 
+    # Validate batch count
+    if args.batch < 1:
+        print("Error: --batch must be >= 1", file=sys.stderr)
+        return
+
     # CLI mode
-    charset_type = args.type
+    charset_type = args.type if args.type is not None else 0
     use_all_payloads = args.all
     length_bytes = args.length or 0
 
-    # Validate length requirement
-    if not use_all_payloads and charset_type not in [3, 4, 5, 8, 10, 11, 12, 13, 14, 15, 16, 17]:
-        if not length_bytes:
-            print("Error: --length is required for this character set type")
-            return
+    # Validate length (must be positive when provided)
+    if args.length is not None and args.length <= 0:
+        print("Error: --length must be > 0", file=sys.stderr)
+        return
 
     # Handle custom character set
     if args.custom:
+        if length_bytes <= 0:
+            print("Error: --length (> 0) is required when using --custom", file=sys.stderr)
+            return
         charset_type = 0  # Use else clause in generate_string
+    elif not use_all_payloads and charset_type not in (PAYLOAD_TYPES | NO_LENGTH_TYPES):
+        if not length_bytes:
+            print("Error: --length is required for this character set type", file=sys.stderr)
+            return
 
     # Generate strings
     results = []
-    for _ in range(args.batch):
+    seen = set()
+    max_attempts = max(args.batch * 50, 100)
+    attempts = 0
+    while len(results) < args.batch:
         if args.custom:
-            generated_string = ''.join(random.choice(args.custom) for _ in range(length_bytes))
+            generated_string = ''.join(secrets.choice(args.custom) for _ in range(length_bytes))
         else:
             generated_string = generate_string(length_bytes, charset_type, use_all_payloads)
 
         if args.encode and not use_all_payloads:
             generated_string = encode_string(generated_string, args.encode)
 
+        if args.unique and generated_string in seen:
+            attempts += 1
+            if attempts > max_attempts:
+                print(f"Warning: only produced {len(results)} unique value(s) "
+                      f"out of {args.batch} requested", file=sys.stderr)
+                break
+            continue
+
+        seen.add(generated_string)
         results.append(generated_string)
 
-    final_output = '\n'.join(results) if args.batch > 1 else results[0]
+    final_output = '\n'.join(results) if len(results) != 1 else results[0]
 
     # Output
     print(final_output)
 
     # Copy to clipboard unless disabled
     if not args.no_clipboard:
-        pyperclip.copy(final_output)
-        print("\n✓ Copied to clipboard", file=__import__('sys').stderr)
+        if copy_to_clipboard(final_output) and not args.quiet:
+            print("\n✓ Copied to clipboard", file=sys.stderr)
 
     # Save to file if specified
     if args.output:
@@ -736,9 +905,10 @@ Examples:
                 with open(args.output, 'w', encoding='utf-8') as f:
                     f.write(final_output)
 
-            print(f"✓ Saved to {args.output}", file=__import__('sys').stderr)
+            if not args.quiet:
+                print(f"✓ Saved to {args.output}", file=sys.stderr)
         except Exception as e:
-            print(f"Error saving file: {e}", file=__import__('sys').stderr)
+            print(f"Error saving file: {e}", file=sys.stderr)
 
     # Save to history
     save_to_history(final_output, charset_type, length_bytes)
