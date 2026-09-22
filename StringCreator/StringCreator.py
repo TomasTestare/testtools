@@ -28,8 +28,33 @@ PAYLOAD_TYPES = {3, 4, 5, 8, 10, 11, 12, 13, 14, 15}
 PERSONNUMMER_TYPES = {16, 17}
 # Types that generate a fixed-format value and ignore the length argument
 NO_LENGTH_TYPES = PERSONNUMMER_TYPES | {18, 19}
-# Highest valid charset type
-MAX_TYPE = 19
+
+# Human-readable labels for every charset type (single source of truth for
+# both the interactive CLI menu and the GUI). Insertion order == display order.
+TYPE_LABELS = {
+    1: "Alphanumeric only (a-z, 0-9)",
+    2: "All ASCII characters",
+    3: "SQL Injection payloads",
+    4: "HTML/XSS payloads",
+    5: "Path traversal payloads",
+    6: "Control characters (\\n \\r \\t \\0)",
+    7: "Unicode/Emoji characters (🔥💻🚀 中文 العربية)",
+    8: "Command injection payloads",
+    9: "Mixed dangerous characters",
+    10: "LDAP injection payloads",
+    11: "XML/XXE injection payloads",
+    12: "SSRF payloads",
+    13: "NoSQL injection payloads",
+    14: "CRLF injection payloads",
+    15: "JWT manipulation payloads",
+    16: "Swedish Personnummer (valid test data from Skatteverket)",
+    17: "Swedish Personnummer (invalid - with incorrect Luhn check digit)",
+    18: "UUID v4",
+    19: "Credit card number (Luhn-valid test data)",
+}
+
+# Highest valid charset type (derived from the label map)
+MAX_TYPE = max(TYPE_LABELS)
 
 
 def copy_to_clipboard(text):
@@ -121,6 +146,37 @@ def view_history():
         print(f"   Type: {entry['type']} | Length: {entry['length']} | Bytes: {entry['byte_size']}")
         print(f"   String: {entry['string']}")
     print("=" * 70)
+
+
+def save_output(path, results, file_format='text', charset_type=None, length_bytes=0):
+    """Write generated results to a file as text, JSON, or CSV.
+
+    Shared by the CLI, interactive mode, and the GUI so export behaviour stays
+    consistent. Raises OSError on write failure (callers handle it).
+    """
+    final_output = '\n'.join(results) if len(results) != 1 else results[0]
+    byte_size = len(final_output.encode('utf-8'))
+
+    if file_format == 'json':
+        data = {
+            "timestamp": datetime.now().isoformat(),
+            "type": charset_type,
+            "length": length_bytes,
+            "content": final_output,
+            "byte_size": byte_size,
+        }
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    elif file_format == 'csv':
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Timestamp', 'Type', 'Length', 'Content', 'Byte Size'])
+            for result in results:
+                writer.writerow([datetime.now().isoformat(), charset_type,
+                                 length_bytes, result, len(result.encode('utf-8'))])
+    else:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(final_output)
 
 
 def encode_string(text, encoding_type):
@@ -532,25 +588,8 @@ def interactive_mode():
 
         # Get character set preference first
         print("\nCharacter set options:")
-        print("1. Alphanumeric only (a-z, 0-9)")
-        print("2. All ASCII characters")
-        print("3. SQL Injection payloads")
-        print("4. HTML/XSS payloads")
-        print("5. Path traversal payloads")
-        print("6. Control characters (\\n \\r \\t \\0)")
-        print("7. Unicode/Emoji characters (🔥💻🚀 中文 العربية)")
-        print("8. Command injection payloads")
-        print("9. Mixed dangerous characters")
-        print("10. LDAP injection payloads")
-        print("11. XML/XXE injection payloads")
-        print("12. SSRF payloads")
-        print("13. NoSQL injection payloads")
-        print("14. CRLF injection payloads")
-        print("15. JWT manipulation payloads")
-        print("16. Swedish Personnummer (valid test data from Skatteverket)")
-        print("17. Swedish Personnummer (invalid - with incorrect Luhn check digit)")
-        print("18. UUID v4")
-        print("19. Credit card number (Luhn-valid test data)")
+        for type_num, label in TYPE_LABELS.items():
+            print(f"{type_num}. {label}")
         print("\n0. View History")
         print("Q. Quit")
 
@@ -680,31 +719,10 @@ def interactive_mode():
             print("3. CSV")
 
             format_choice = input("Choose format (1-3, default 1): ").strip()
+            file_format = {'2': 'json', '3': 'csv'}.get(format_choice, 'text')
 
             try:
-                if format_choice == '2':
-                    data = {
-                        "timestamp": datetime.now().isoformat(),
-                        "type": charset_type,
-                        "length": length_bytes,
-                        "content": final_output,
-                        "byte_size": byte_size
-                    }
-                    with open(filename, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, indent=2, ensure_ascii=False)
-                elif format_choice == '3':
-                    with open(filename, 'w', newline='', encoding='utf-8') as f:
-                        writer = csv.writer(f)
-                        writer.writerow(['Timestamp', 'Type', 'Length', 'Content', 'Byte Size'])
-                        if batch_count > 1:
-                            for result in results:
-                                writer.writerow([datetime.now().isoformat(), charset_type, length_bytes, result, len(result.encode('utf-8'))])
-                        else:
-                            writer.writerow([datetime.now().isoformat(), charset_type, length_bytes, final_output, byte_size])
-                else:
-                    with open(filename, 'w', encoding='utf-8') as f:
-                        f.write(final_output)
-
+                save_output(filename, results, file_format, charset_type, length_bytes)
                 print(f"✓ Saved to {filename}")
             except Exception as e:
                 print(f"Error saving file: {e}")
@@ -885,26 +903,7 @@ Examples:
     # Save to file if specified
     if args.output:
         try:
-            if args.format == 'json':
-                data = {
-                    "timestamp": datetime.now().isoformat(),
-                    "type": charset_type,
-                    "length": length_bytes,
-                    "content": final_output,
-                    "byte_size": len(final_output.encode('utf-8'))
-                }
-                with open(args.output, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-            elif args.format == 'csv':
-                with open(args.output, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(['Timestamp', 'Type', 'Length', 'Content', 'Byte Size'])
-                    for result in results:
-                        writer.writerow([datetime.now().isoformat(), charset_type, length_bytes, result, len(result.encode('utf-8'))])
-            else:
-                with open(args.output, 'w', encoding='utf-8') as f:
-                    f.write(final_output)
-
+            save_output(args.output, results, args.format, charset_type, length_bytes)
             if not args.quiet:
                 print(f"✓ Saved to {args.output}", file=sys.stderr)
         except Exception as e:
