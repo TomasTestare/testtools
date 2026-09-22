@@ -136,7 +136,9 @@ If you prefer not to use a virtual environment:
 
 A local desktop GUI (built with [NiceGUI](https://nicegui.io/)) is available as an
 alternative to the command line. It reuses the same core, so every generator, the
-validation tools, and history are available with a point-and-click interface.
+validation tools, and history are available with a point-and-click interface. The GUI
+ships with a custom **cyber/hacker dark theme** — neon green/cyan accents, a glowing
+logo, glass-effect panels, and an animated grid background (assets live in `assets/`).
 
 1. **Install the GUI dependencies** (in addition to the base requirements):
    ```bash
@@ -373,6 +375,7 @@ StringCreator/
 │
 ├── StringCreator.py       # Main script (CLI + interactive mode)
 ├── gui.py                 # NiceGUI desktop GUI (optional)
+├── assets/                # GUI theme assets (logo.svg, favicon.svg)
 ├── requirements.txt       # Runtime dependency (pyperclip)
 ├── requirements-gui.txt   # Optional GUI dependencies (nicegui, pywebview)
 ├── test_stringcreator.py  # Core unit tests
